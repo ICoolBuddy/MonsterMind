@@ -99,8 +99,15 @@ jobs:
         LOG="${{ steps.findlog.outputs.crash }}"
         DSYM=$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1)
     
-        # NEW → add xcrun in front so Bash can find the tool
-        xcrun symbolicatecrash "$LOG" "$DSYM" > crash.symbolicated
+        # 1 ▸ locate the script inside the active Xcode bundle
+        TOOL=$(find "$(xcode-select -p)" -name symbolicatecrash -type f | head -n1)
+        if [ -z "$TOOL" ]; then
+          echo "::error ::symbolicatecrash script not found inside $(xcode-select -p)"; exit 1
+        fi
+        echo "Using $TOOL"
+    
+        # 2 ▸ run it
+        "$TOOL" "$LOG" "$DSYM" > crash.symbolicated
 
     - uses: actions/upload-artifact@v4
       if: steps.findlog.outputs.crash != ''
