@@ -1,77 +1,48 @@
-# File: .github/workflows/haxe-ipa.yml
-name: Build-iOS-Unsigned-IPA
-
+name: Build unsigned iOS IPA
 on:
-  workflow_dispatch:          # ▶ Run from the “Actions” tab
+  workflow_dispatch:
+  push: { branches: [main] }
 
 jobs:
-  build:
-    runs-on: macos-13         # Xcode 15.4 image (stable, fast)
+  ios:
+    runs-on: macos-13          # see note above
     steps:
+      - uses: actions/checkout@v4
 
-    ############################################################
-    # 1 ▸ Check out your repo
-    ############################################################
-    - uses: actions/checkout@v4
+      # 1 / install Haxe + Neko on the runner
+      - uses: krdlab/setup-haxe@v1          # GitHub-marketplace action
+        with:
+          haxe-version: 4.3.4               # pick the version you use locally
+      # the action automatically puts Haxe + Neko on PATH :contentReference[oaicite:3]{index=3}
 
-    ############################################################
-    # 2 ▸ PATCH the project so the External Build Tool uses /usr/bin/make
-    #     – this removes the “unable to spawn …/make” error forever
-    ############################################################
-    - name: Fix “Build Haxe” make-path
-      shell: bash
-      run: |
-        PBX="export/ios/MonsterMind.xcodeproj/project.pbxproj"
-        echo "🔧 Before:"; grep -n '"Build Haxe"' -A3 -B1 "$PBX" || true
+      # 2 / install Haxelib deps the same way you do locally
+      - name: Install OpenFL tool-chain
+        run: |
+          haxelib setup ~/haxelib
+          haxelib install lime --quiet
+          haxelib install openfl --quiet
+          haxelib install hxcpp --quiet
+          haxelib run lime setup -y
+          haxelib run openfl setup -y
 
-        # Replace absolute or $(DEVELOPER_DIR) paths with /usr/bin/make
-        sed -Ei.bak \
-          -e 's|/Applications/Xcode[^"]*/usr/bin/make|/usr/bin/make|g' \
-          -e 's|\$\([Dd][Ee][Vv][Ee][Ll][Oo][Pp][Ee][Rr]_[Dd][Ii][Rr]\)/usr/bin/make|/usr/bin/make|g' \
-          "$PBX"
+      # 3 / compile for iOS WITHOUT signing
+      - name: Build .app bundle
+        run: |
+          haxelib run lime build ios -release -nosign   # <-- the magic switch
+      # the same flag is used in real-world GH runs :contentReference[oaicite:4]{index=4}
+      # (OpenFL internally calls xcodebuild with CODE_SIGNING_ALLOWED=NO)
 
-        echo "✅ After:"; grep -n '"Build Haxe"' -A3 -B1 "$PBX"
+      # 4 / wrap the .app into an .ipa
+      - name: Package unsigned IPA
+        run: |
+          APP=$(find Export/ios/build/Release-iphoneos -name '*.app' -maxdepth 1 | head -n1)
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -r -y unsigned.ipa Payload       # classic Payload.zip trick
+      # the Payload→zip→rename trick is the canonical manual approach :contentReference[oaicite:5]{index=5}
 
-    ############################################################
-    # 3 ▸ BUILD the .app with code-signing disabled
-    ############################################################
-    - name: Compile (unsigned)
-      id: buildapp
-      shell: bash
-      run: |
-        cd export/ios
-        xcodebuild \
-          -project   MonsterMind.xcodeproj \
-          -scheme    MonsterMind \
-          -configuration Release \
-          -destination 'generic/platform=iOS' \
-          -derivedDataPath build \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGN_ENTITLEMENTS="" \
-          clean build
-
-        # Grab the .app path for the next step
-        APP_PATH=$(find build -name '*.app' -type d | head -n 1)
-        echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
-
-    ############################################################
-    # 4 ▸ PACKAGE the .app into an unsigned IPA
-    ############################################################
-    - name: Create unsigned IPA
-      shell: bash
-      working-directory: export/ios
-      run: |
-        mkdir -p Payload
-        cp -R "${{ steps.buildapp.outputs.app }}" Payload/
-        /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
-
-    ############################################################
-    # 5 ▸ UPLOAD the IPA as a downloadable artifact
-    ############################################################
-    - name: Upload IPA
-      uses: actions/upload-artifact@v4
-      with:
-        name: MonsterMind-unsigned
-        path: export/ios/MonsterMind-unsigned.ipa
-        retention-days: 7
+      # 5 / expose the artifact
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: unsigned.ipa
