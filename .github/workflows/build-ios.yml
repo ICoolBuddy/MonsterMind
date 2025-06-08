@@ -1,13 +1,22 @@
 name: Build-iOS-Unsigned-IPA
 
 on:
-  workflow_dispatch        # add "push:" here if you want auto-builds
+  workflow_dispatch          # add "push:" below if you want auto-builds
 
 jobs:
   build:
-    runs-on: macos-13      # ✅ Xcode 15.4 image (bundles /usr/bin/make)
+    runs-on: macos-13        # Xcode 15.4 image
     steps:
     - uses: actions/checkout@v4
+
+    # ───── NEW: give Xcode its missing 'make' ─────
+    - name: Add make symlink for Xcode 15+
+      run: |
+        SYS_MAKE=$(command -v make)                   # → /usr/bin/make
+        TOOLCHAIN_DIR="$(xcode-select -p)/usr/bin"    # → ...Developer/usr/bin
+        sudo mkdir -p "$TOOLCHAIN_DIR"
+        sudo ln -sf "$SYS_MAKE" "$TOOLCHAIN_DIR/make"
+    # ───────────────────────────────────────────────
 
     - name: Build .app (codesign disabled)
       id: buildapp
@@ -25,7 +34,6 @@ jobs:
           CODE_SIGN_ENTITLEMENTS="" \
           clean build
 
-        # capture the .app path for the next step
         APP_PATH=$(find build -name '*.app' -type d | head -n 1)
         echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
 
