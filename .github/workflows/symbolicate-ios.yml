@@ -1,43 +1,46 @@
-name: Symbolicate iOS crash log
+name: Build unsigned iOS IPA
 
-on:                        # you’ll launch it manually
+on:
+  push: {branches: [main]}
   workflow_dispatch:
 
 jobs:
-  symbolicate:
-    runs-on: macos-13      # free macOS runner
-
+  build:
+    runs-on: macos-13
     steps:
-    # 1 ▸ check out the repo (so we can read crashlogs/)
-    - uses: actions/checkout@v4
-
-    # 2 ▸ pull the dSYM artifact produced by your last iOS build
-    - uses: actions/download-artifact@v4
+    # … all your existing build steps …
+    - uses: actions/upload-artifact@v4
       with:
-        name: ios-dsym            # must match the name you used in the build workflow
-        path: dsym
+        name: ios-dsym
+        path: Export/ios/build/Release-iphoneos/**/*.dSYM
+    - uses: actions/upload-artifact@v4
+      with:
+        name: unsigned-ipa
+        path: unsigned.ipa
 
-    # 3 ▸ pick the first crash file in crashlogs/
+  symbolicate:
+    needs: build                 # ← waits for build job
+    runs-on: macos-13
+    if: ${{ github.ref == 'refs/heads/main' }}  # run only on main
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4       # now same run ⇒ simple
+      with:
+        name: ios-dsym
+        path: dsym
     - name: Locate crash log
       id: findlog
       run: |
         CRASH=$(ls crashlogs/*.{ips,crash} 2>/dev/null | head -n1)
         if [ -z "$CRASH" ]; then
-          echo "No crash file found in crashlogs/"; exit 1
+          echo "No crash log in crashlogs/"; exit 1
         fi
-        echo "crash=$CRASH" >> "$GITHUB_OUTPUT"
-
-    # 4 ▸ run Apple’s symbolicatecrash (ships with Xcode)
+        echo "crash=$CRASH" >> $GITHUB_OUTPUT
     - name: Symbolicate
       run: |
-        LOG="${{ steps.findlog.outputs.crash }}"
-        DSYM=$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1)
-        if [ -z "$DSYM" ]; then
-          echo "No dSYM downloaded — did your build workflow upload ios-dsym?"; exit 1
-        fi
-        symbolicatecrash "$LOG" "$DSYM" > crash.symbolicated
-
-    # 5 ▸ hand you the human-readable file
+        symbolicatecrash "${{ steps.findlog.outputs.crash }}" \
+                         "$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1)" \
+                         > crash.symbolicated
     - uses: actions/upload-artifact@v4
       with:
         name: symbolicated-crash
