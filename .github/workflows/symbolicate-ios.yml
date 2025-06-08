@@ -1,47 +1,107 @@
 name: Build unsigned iOS IPA
 
 on:
-  push: {branches: [main]}
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
+# ───────────────────────────────────────────────
+# 1. BUILD job – compiles, packages, uploads IPA + dSYM
+# ───────────────────────────────────────────────
   build:
     runs-on: macos-13
+
     steps:
-    # … all your existing build steps …
-    - uses: actions/upload-artifact@v4
+    # 1 ▸ checkout your repo
+    - uses: actions/checkout@v4
+
+    # 2 ▸ install Haxe + Neko
+    - uses: krdlab/setup-haxe@v1
       with:
-        name: ios-dsym
-        path: Export/ios/build/Release-iphoneos/**/*.dSYM
+        haxe-version: 4.3.4         # keep in sync with local
+
+    # 3 ▸ restore or prime haxelib cache (optional-but-nice)
+    - uses: actions/cache@v4
+      with:
+        path: ~/haxelib
+        key: ${{ runner.os }}-haxelib-${{ hashFiles('haxelib.json') }}
+        restore-keys: |
+          ${{ runner.os }}-haxelib-
+
+    # 4 ▸ install all libs you need
+    - name: Install Haxelib deps
+      run: |
+        haxelib setup ~/haxelib
+        haxelib install lime --quiet
+        haxelib install openfl --quiet
+        haxelib install flixel --quiet
+        haxelib install flixel-addons --quiet  # comment out if unused
+        haxelib install flixel-ui --quiet      # comment out if unused
+        haxelib run lime setup -y
+
+    # 5 ▸ build for iOS **without** signing
+    - name: Lime build (unsigned)
+      run: |
+        haxelib run lime build ios -release -nosign
+
+    # 6 ▸ wrap the .app into an .ipa
+    - name: Package unsigned IPA
+      run: |
+        APP=$(find export/ios/build/Release-iphoneos -name '*.app' -maxdepth 1 | head -n1)
+        if [ -z "$APP" ]; then
+          echo "::error ::No .app bundle found – did the build fail?"; exit 1
+        fi
+        mkdir Payload
+        cp -R "$APP" Payload/
+        zip -r -y unsigned.ipa Payload
+
+    # 7 ▸ upload artifacts so the next job can read them
     - uses: actions/upload-artifact@v4
       with:
         name: unsigned-ipa
         path: unsigned.ipa
 
-  symbolicate:
-    needs: build                 # ← waits for build job
-    runs-on: macos-13
-    if: ${{ github.ref == 'refs/heads/main' }}  # run only on main
-    steps:
-    - uses: actions/checkout@v4
-    - uses: actions/download-artifact@v4       # now same run ⇒ simple
+    - uses: actions/upload-artifact@v4
       with:
         name: ios-dsym
+        path: export/ios/build/Release-iphoneos/**/*.dSYM   # ← lower-case “export”
+
+# ───────────────────────────────────────────────
+# 2. SYMBOLICATE job – turns crashlogs/*.ips into human lines
+# ───────────────────────────────────────────────
+  symbolicate:
+    needs: build                 # wait until build completes
+    runs-on: macos-13
+    if: ${{ github.ref == 'refs/heads/main' }}
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: ios-dsym           # same artifact name as above
         path: dsym
+
     - name: Locate crash log
       id: findlog
       run: |
         CRASH=$(ls crashlogs/*.{ips,crash} 2>/dev/null | head -n1)
         if [ -z "$CRASH" ]; then
-          echo "No crash log in crashlogs/"; exit 1
+          echo "::warning ::No crash log in crashlogs/ – skipping symbolication"
+          exit 0
         fi
         echo "crash=$CRASH" >> $GITHUB_OUTPUT
+
     - name: Symbolicate
+      if: steps.findlog.outputs.crash != ''
       run: |
         symbolicatecrash "${{ steps.findlog.outputs.crash }}" \
                          "$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1)" \
                          > crash.symbolicated
+
     - uses: actions/upload-artifact@v4
+      if: steps.findlog.outputs.crash != ''
       with:
         name: symbolicated-crash
         path: crash.symbolicated
