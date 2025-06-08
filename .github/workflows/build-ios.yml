@@ -1,27 +1,28 @@
 name: Build-iOS-Unsigned-IPA
 
 on:
-  workflow_dispatch          # add "push:" if you want auto-builds
+  workflow_dispatch          # you will trigger it manually
 
 jobs:
   build:
-    runs-on: macos-13        # Xcode 15.4 image
+    runs-on: macos-13        # GitHub image with Xcode 15.4
     steps:
+
+    # 1 ▸ check out your source
     - uses: actions/checkout@v4
 
-    # 1️⃣  Rewrite the absolute make-path inside the .pbxproj
-    - name: Point “Build Haxe” build tool to /usr/bin/make
+    # 2 ▸ FIX the hard-coded make path inside the Xcode project
+    - name: Point “Build Haxe” to the real make
       shell: bash
       run: |
+        # go to the folder that holds MonsterMind.xcodeproj
         cd export/ios
-        # Replace any “…Developer/usr/bin/make” with /usr/bin/make
+        # replace ANY “…Developer/usr/bin/make” with /usr/bin/make
         sed -Ei.bak 's|/Applications/Xcode[^"]*/usr/bin/make|/usr/bin/make|g' \
           MonsterMind.xcodeproj/project.pbxproj
-        # show what we changed (one line) for the log
-        grep -n '"Build Haxe"' -A4 -B2 MonsterMind.xcodeproj/project.pbxproj | head -n 12
 
-    # 2️⃣  Build with signing disabled
-    - name: Build .app (codesign disabled)
+    # 3 ▸ build the app with code-signing disabled
+    - name: Build .app (unsigned)
       id: buildapp
       shell: bash
       run: |
@@ -36,10 +37,11 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGN_ENTITLEMENTS="" \
           clean build
+        # remember where the .app landed
         APP_PATH=$(find build -name '*.app' -type d | head -n 1)
         echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
 
-    # 3️⃣  Package the unsigned .ipa
+    # 4 ▸ zip the .app into an unsigned IPA
     - name: Package unsigned .ipa
       shell: bash
       working-directory: export/ios
@@ -48,7 +50,7 @@ jobs:
         cp -R "${{ steps.buildapp.outputs.app }}" Payload/
         /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
 
-    # 4️⃣  Upload the artifact
+    # 5 ▸ upload the IPA as a workflow artifact
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
