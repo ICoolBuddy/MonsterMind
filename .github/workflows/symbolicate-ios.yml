@@ -1,119 +1,53 @@
-name: Build unsigned iOS IPA
-
+name: Symbolicate crash log
+# Manual “Run workflow” button only – never triggers on push
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'crashlogs/**'
-      - 'dsym/**'
   workflow_dispatch:
 
 jobs:
-# ───────────────────────────────────────────────
-# 1. BUILD job – compiles, packages, uploads IPA + dSYM
-# ───────────────────────────────────────────────
-  build:
-    runs-on: macos-13
-
-    steps:
-    # 1 ▸ checkout your repo
-    - uses: actions/checkout@v4
-
-    # 2 ▸ install Haxe + Neko
-    - uses: krdlab/setup-haxe@v1
-      with:
-        haxe-version: 4.3.4         # keep in sync with local
-
-    # 3 ▸ restore or prime haxelib cache (optional-but-nice)
-    - uses: actions/cache@v4
-      with:
-        path: ~/haxelib
-        key: ${{ runner.os }}-haxelib-${{ hashFiles('haxelib.json') }}
-        restore-keys: |
-          ${{ runner.os }}-haxelib-
-
-    # 4 ▸ install all libs you need
-    - name: Install Haxelib deps
-      run: |
-        haxelib setup ~/haxelib
-        haxelib install lime --quiet
-        haxelib install openfl --quiet
-        haxelib install flixel --quiet
-        haxelib install flixel-addons --quiet  # comment out if unused
-        haxelib install flixel-ui --quiet      # comment out if unused
-        haxelib run lime setup -y
-
-    # 5 ▸ build for iOS **without** signing
-    - name: Lime build (unsigned)
-      run: |
-        haxelib run lime build ios -release -nosign
-
-    # 6 ▸ wrap the .app into an .ipa
-    - name: Package unsigned IPA
-      run: |
-        APP=$(find export/ios/build/Release-iphoneos -name '*.app' -maxdepth 1 | head -n1)
-        if [ -z "$APP" ]; then
-          echo "::error ::No .app bundle found – did the build fail?"; exit 1
-        fi
-        mkdir Payload
-        cp -R "$APP" Payload/
-        zip -r -y unsigned.ipa Payload
-
-    # 7 ▸ upload artifacts so the next job can read them
-    - uses: actions/upload-artifact@v4
-      with:
-        name: unsigned-ipa
-        path: unsigned.ipa
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: ios-dsym
-        path: export/ios/build/Release-iphoneos/**/*.dSYM   # ← lower-case “export”
-
-# ───────────────────────────────────────────────
-# 2. SYMBOLICATE job – turns crashlogs/*.ips into human lines
-# ───────────────────────────────────────────────
   symbolicate:
-  # needs: build                 # wait until build completes
-    runs-on: macos-13
-    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: macos-13     # free macOS runner
 
     steps:
+    # 1 ▸ pull the repo (so we get crashlogs/ + dsym/)
     - uses: actions/checkout@v4
 
-    - uses: actions/download-artifact@v4
-      with:
-        name: ios-dsym           # same artifact name as above
-        path: dsym
-
-    - name: Locate crash log
-      id: findlog
+    # 2 ▸ sanity-check that both files exist
+    - name: Verify inputs
+      id: verify
       run: |
-        CRASH=$(ls crashlogs/*.{ips,crash} 2>/dev/null | head -n1)
-        if [ -z "$CRASH" ]; then
-          echo "::warning ::No crash log in crashlogs/ – skipping symbolication"
-          exit 0
+        LOG=$(ls crashlogs/*.{ips,crash} 2>/dev/null | head -n1 || true)
+        if [ -z "$LOG" ]; then
+          echo "::error ::No .ips or .crash file found in crashlogs/"; exit 1
         fi
-        echo "crash=$CRASH" >> $GITHUB_OUTPUT
+        DSYM=$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1 || true)
+        if [ -z "$DSYM" ]; then
+          echo "::error ::No .dSYM bundle found in dsym/"; exit 1
+        fi
+        echo "LOG=$LOG"   >> $GITHUB_ENV
+        echo "DSYM=$DSYM" >> $GITHUB_ENV
+        echo "Found log:  $LOG"
+        echo "Found dSYM: $DSYM"
 
-    - name: Symbolicate
-      if: steps.findlog.outputs.crash != ''
+    # 3 ▸ locate symbolicatecrash inside the installed Xcode (Xcode 15+ no longer
+    #     exposes it via xcrun, so we search once)
+    - name: Locate symbolicatecrash
+      id: tool
       run: |
-        LOG="${{ steps.findlog.outputs.crash }}"
-        DSYM=$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1)
-    
-        # 1 ▸ locate the script inside the active Xcode bundle
         TOOL=$(find "$(xcode-select -p)" -name symbolicatecrash -type f | head -n1)
         if [ -z "$TOOL" ]; then
           echo "::error ::symbolicatecrash script not found inside $(xcode-select -p)"; exit 1
         fi
+        echo "TOOL=$TOOL" >> $GITHUB_ENV
         echo "Using $TOOL"
-    
-        # 2 ▸ run it
-        "$TOOL" "$LOG" "$DSYM" > crash.symbolicated
 
+    # 4 ▸ run the symbolication
+    - name: Symbolicate
+      run: |
+        "$TOOL" "$LOG" "$DSYM" > crash.symbolicated
+        echo "Created crash.symbolicated"
+
+    # 5 ▸ hand the readable stack trace back to you
     - uses: actions/upload-artifact@v4
-      if: steps.findlog.outputs.crash != ''
       with:
         name: symbolicated-crash
         path: crash.symbolicated
