@@ -1,22 +1,22 @@
 name: Build-iOS-Unsigned-IPA
 
 on:
-  workflow_dispatch          # add "push:" below if you want auto-builds
+  workflow_dispatch
 
 jobs:
   build:
-    runs-on: macos-13        # Xcode 15.4 image
+    runs-on: macos-13          # Xcode 15.x image
     steps:
     - uses: actions/checkout@v4
 
-    # ───── NEW: give Xcode its missing 'make' ─────
-    - name: Add make symlink for Xcode 15+
+    - name: Add make symlink for every Xcode 15/16 bundle
       run: |
-        SYS_MAKE=$(command -v make)                   # → /usr/bin/make
-        TOOLCHAIN_DIR="$(xcode-select -p)/usr/bin"    # → ...Developer/usr/bin
-        sudo mkdir -p "$TOOLCHAIN_DIR"
-        sudo ln -sf "$SYS_MAKE" "$TOOLCHAIN_DIR/make"
-    # ───────────────────────────────────────────────
+        SYS_MAKE=$(command -v make)
+        for XCODE in /Applications/Xcode_*.app; do
+          TARGET_BIN="$XCODE/Contents/Developer/usr/bin"
+          sudo mkdir -p "$TARGET_BIN"
+          sudo ln -sf "$SYS_MAKE" "$TARGET_BIN/make"
+        done
 
     - name: Build .app (codesign disabled)
       id: buildapp
