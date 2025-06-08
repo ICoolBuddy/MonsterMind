@@ -98,7 +98,8 @@ jobs:
       run: |
         LOG="${{ steps.findlog.outputs.crash }}"
         DSYM=$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1)
-        # xcrun makes sure symbolicatecrash is found
+    
+        # NEW → add xcrun in front so Bash can find the tool
         xcrun symbolicatecrash "$LOG" "$DSYM" > crash.symbolicated
 
     - uses: actions/upload-artifact@v4
