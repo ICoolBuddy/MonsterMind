@@ -33,9 +33,11 @@ jobs:
     - name: Locate symbolicatecrash
       id: tool
       run: |
-        TOOL=$(find "$(xcode-select -p)" -name symbolicatecrash -type f | head -n1)
+        # Go up two levels: …/Contents/Developer → …/Contents
+        XCODE_BUNDLE=$(dirname "$(dirname "$(xcode-select -p)")")
+        TOOL=$(find "$XCODE_BUNDLE" -name symbolicatecrash -type f | head -n1)
         if [ -z "$TOOL" ]; then
-          echo "::error ::symbolicatecrash script not found inside $(xcode-select -p)"; exit 1
+          echo "::error ::symbolicatecrash not found inside $XCODE_BUNDLE"; exit 1
         fi
         echo "TOOL=$TOOL" >> $GITHUB_ENV
         echo "Using $TOOL"
