@@ -1,20 +1,13 @@
 name: Build-iOS-Unsigned-IPA
+
 on:
-  workflow_dispatch         # add "push:" here if you want auto-builds
+  workflow_dispatch        # add "push:" here if you want auto-builds
 
 jobs:
   build:
-    runs-on: macos-15            # keep or change, see note below
+    runs-on: macos-13      # ✅ Xcode 15.4 image (bundles /usr/bin/make)
     steps:
     - uses: actions/checkout@v4
-
-    # ➤ NEW step
-    - name: Work-around “make not found” in Xcode 16 beta
-      run: |
-        SYS_MAKE=$(command -v make)
-        TOOLCHAIN_DIR="$(xcode-select -p)/usr/bin"
-        sudo mkdir -p "$TOOLCHAIN_DIR"
-        sudo ln -sf "$SYS_MAKE" "$TOOLCHAIN_DIR/make"
 
     - name: Build .app (codesign disabled)
       id: buildapp
@@ -31,16 +24,18 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGN_ENTITLEMENTS="" \
           clean build
+
+        # capture the .app path for the next step
         APP_PATH=$(find build -name '*.app' -type d | head -n 1)
         echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
 
     - name: Package unsigned .ipa
       shell: bash
+      working-directory: export/ios
       run: |
         mkdir -p Payload
         cp -R "${{ steps.buildapp.outputs.app }}" Payload/
         /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
-      working-directory: export/ios               # same place we just built in
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
