@@ -200,7 +200,7 @@
 			buildConfigurationList = 1EF0A885121AE21C003F2F59 /* Build configuration list for PBXLegacyTarget "Build Haxe" */;
 			buildPhases = (
 			);
-			buildToolPath = make;
+			buildToolPath = "/usr/bin/make";
 			buildWorkingDirectory = "MonsterMind/haxe";
 			dependencies = (
 			);
