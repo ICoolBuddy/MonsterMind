@@ -1,48 +1,59 @@
 name: Build unsigned iOS IPA
+
 on:
-  workflow_dispatch:
-  push: { branches: [main] }
+  push:
+    branches: [main]        # trigger on pushes to main
+  workflow_dispatch:        # manual “Run workflow” button
 
 jobs:
   ios:
-    runs-on: macos-13          # see note above
+    runs-on: macos-13       # Intel runner – setup-haxe is happiest here
+
     steps:
-      - uses: actions/checkout@v4
+    # 1 / check out your repo
+    - uses: actions/checkout@v4
 
-      # 1 / install Haxe + Neko on the runner
-      - uses: krdlab/setup-haxe@v1          # GitHub-marketplace action
-        with:
-          haxe-version: 4.3.4               # pick the version you use locally
-      # the action automatically puts Haxe + Neko on PATH :contentReference[oaicite:3]{index=3}
+    # 2 / install Haxe + Neko
+    - uses: krdlab/setup-haxe@v1
+      with:
+        haxe-version: 4.3.4    # keep this in sync with your local version
 
-      # 2 / install Haxelib deps the same way you do locally
-      - name: Install OpenFL tool-chain
-        run: |
-          haxelib setup ~/haxelib
-          haxelib install lime --quiet
-          haxelib install openfl --quiet
-          haxelib install hxcpp --quiet
-          haxelib run lime setup -y
-          haxelib run openfl setup -y
+    # 3 / cache the haxelib folder to speed up repeated runs
+    - name: Cache haxelib
+      uses: actions/cache@v4
+      with:
+        path: ~/haxelib
+        key: ${{ runner.os }}-haxelib-${{ hashFiles('haxelib.json') }}
+        restore-keys: |
+          ${{ runner.os }}-haxelib-
 
-      # 3 / compile for iOS WITHOUT signing
-      - name: Build .app bundle
-        run: |
-          haxelib run lime build ios -release -nosign   # <-- the magic switch
-      # the same flag is used in real-world GH runs :contentReference[oaicite:4]{index=4}
-      # (OpenFL internally calls xcodebuild with CODE_SIGNING_ALLOWED=NO)
+    # 4 / install every library the project needs
+    - name: Install OpenFL + Flixel stack
+      run: |
+        haxelib setup ~/haxelib
+        haxelib install lime --quiet
+        haxelib install openfl --quiet
+        haxelib install flixel --quiet
+        haxelib install flixel-addons --quiet   # comment out if unused
+        haxelib install flixel-ui --quiet       # comment out if unused
+        haxelib run lime setup -y
+        haxelib run lime setup flixel -y        # templates & tools
 
-      # 4 / wrap the .app into an .ipa
-      - name: Package unsigned IPA
-        run: |
-          APP=$(find Export/ios/build/Release-iphoneos -name '*.app' -maxdepth 1 | head -n1)
-          mkdir Payload
-          cp -R "$APP" Payload/
-          zip -r -y unsigned.ipa Payload       # classic Payload.zip trick
-      # the Payload→zip→rename trick is the canonical manual approach :contentReference[oaicite:5]{index=5}
+    # 5 / compile for iOS (release, unsigned)
+    - name: Build unsigned .app
+      run: |
+        haxelib run lime build ios -release -nosign
 
-      # 5 / expose the artifact
-      - uses: actions/upload-artifact@v4
-        with:
-          name: unsigned-ipa
-          path: unsigned.ipa
+    # 6 / zip Payload → .ipa
+    - name: Package unsigned IPA
+      run: |
+        APP=$(find Export/ios/build/Release-iphoneos -name '*.app' -maxdepth 1 | head -n1)
+        mkdir Payload
+        cp -R "$APP" Payload/
+        zip -r -y unsigned.ipa Payload
+
+    # 7 / upload the artifact
+    - uses: actions/upload-artifact@v4
+      with:
+        name: unsigned-ipa
+        path: unsigned.ipa
