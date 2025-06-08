@@ -4,15 +4,23 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15       # Xcode 15.4 runner
+    runs-on: macos-15            # keep or change, see note below
     steps:
     - uses: actions/checkout@v4
+
+    # ➤ NEW step
+    - name: Work-around “make not found” in Xcode 16 beta
+      run: |
+        SYS_MAKE=$(command -v make)
+        TOOLCHAIN_DIR="$(xcode-select -p)/usr/bin"
+        sudo mkdir -p "$TOOLCHAIN_DIR"
+        sudo ln -sf "$SYS_MAKE" "$TOOLCHAIN_DIR/make"
 
     - name: Build .app (codesign disabled)
       id: buildapp
       shell: bash
       run: |
-        cd export/ios                         # stay in the folder that HAS the xcodeproj
+        cd export/ios
         xcodebuild \
           -project   MonsterMind.xcodeproj \
           -scheme    MonsterMind \
@@ -21,9 +29,8 @@ jobs:
           -derivedDataPath build \
           CODE_SIGNING_ALLOWED=NO \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGN_ENTITLEMENTS=""      #  ◀︎ add this line
+          CODE_SIGN_ENTITLEMENTS="" \
           clean build
-
         APP_PATH=$(find build -name '*.app' -type d | head -n 1)
         echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
 
