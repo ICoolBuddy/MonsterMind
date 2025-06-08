@@ -3,6 +3,9 @@ name: Build unsigned iOS IPA
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'crashlogs/**'
+      - 'dsym/**'
   workflow_dispatch:
 
 jobs:
@@ -71,7 +74,7 @@ jobs:
 # 2. SYMBOLICATE job – turns crashlogs/*.ips into human lines
 # ───────────────────────────────────────────────
   symbolicate:
-    needs: build                 # wait until build completes
+  # needs: build                 # wait until build completes
     runs-on: macos-13
     if: ${{ github.ref == 'refs/heads/main' }}
 
