@@ -45,8 +45,17 @@ jobs:
     # 4 ▸ run the symbolication
     - name: Symbolicate
       run: |
+        LOG=$(ls crashlogs/*.{ips,crash} | head -n1)
+        DSYM=$(find dsym -name '*.dSYM' | head -n1)
+        XCODE_BUNDLE=$(dirname "$(dirname "$(xcode-select -p)")")
+        TOOL=$(find "$XCODE_BUNDLE" -name symbolicatecrash -type f | head -n1)
+    
+        # ── NEW: tell the script where Xcode’s Developer dir is ──
+        export DEVELOPER_DIR="$(xcode-select -p)"
+        # (optional but nice) suppress “Missing Atos” spam
+        export OS_ACTIVITY_MODE=disable
+    
         "$TOOL" "$LOG" "$DSYM" > crash.symbolicated
-        echo "Created crash.symbolicated"
 
     # 5 ▸ hand the readable stack trace back to you
     - uses: actions/upload-artifact@v4
