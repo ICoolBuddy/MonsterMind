@@ -1,42 +1,77 @@
-name: iOS-ipa-build
+# File: .github/workflows/haxe-ipa.yml
+name: Build-iOS-Unsigned-IPA
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:          # ▶ Run from the “Actions” tab
 
 jobs:
-  build-ios:
-    name: 🎉 iOS Build
-    runs-on: macos-latest
+  build:
+    runs-on: macos-13         # Xcode 15.4 image (stable, fast)
     steps:
-      - uses: actions/checkout@v3
 
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          architecture: x64
-      - run: flutter pub get
-      
+    ############################################################
+    # 1 ▸ Check out your repo
+    ############################################################
+    - uses: actions/checkout@v4
 
-      - run: pod repo update
-        working-directory: ios
+    ############################################################
+    # 2 ▸ PATCH the project so the External Build Tool uses /usr/bin/make
+    #     – this removes the “unable to spawn …/make” error forever
+    ############################################################
+    - name: Fix “Build Haxe” make-path
+      shell: bash
+      run: |
+        PBX="export/ios/MonsterMind.xcodeproj/project.pbxproj"
+        echo "🔧 Before:"; grep -n '"Build Haxe"' -A3 -B1 "$PBX" || true
 
-      - run: flutter build ios --release --no-codesign
+        # Replace absolute or $(DEVELOPER_DIR) paths with /usr/bin/make
+        sed -Ei.bak \
+          -e 's|/Applications/Xcode[^"]*/usr/bin/make|/usr/bin/make|g' \
+          -e 's|\$\([Dd][Ee][Vv][Ee][Ll][Oo][Pp][Ee][Rr]_[Dd][Ii][Rr]\)/usr/bin/make|/usr/bin/make|g' \
+          "$PBX"
 
-      - run: mkdir Payload
-        working-directory: build/ios/iphoneos
+        echo "✅ After:"; grep -n '"Build Haxe"' -A3 -B1 "$PBX"
 
-      - run: mv Runner.app/ Payload
-        working-directory: build/ios/iphoneos
+    ############################################################
+    # 3 ▸ BUILD the .app with code-signing disabled
+    ############################################################
+    - name: Compile (unsigned)
+      id: buildapp
+      shell: bash
+      run: |
+        cd export/ios
+        xcodebuild \
+          -project   MonsterMind.xcodeproj \
+          -scheme    MonsterMind \
+          -configuration Release \
+          -destination 'generic/platform=iOS' \
+          -derivedDataPath build \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_ENTITLEMENTS="" \
+          clean build
 
-      - name: Zip output
-        run: zip -qq -r -9 FlutterIpaExport.ipa Payload
-        working-directory: build/ios/iphoneos
+        # Grab the .app path for the next step
+        APP_PATH=$(find build -name '*.app' -type d | head -n 1)
+        echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
 
-      - name: Upload binaries to release
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: build/ios/iphoneos/FlutterIpaExport.ipa
-          tag: v1.0
-          overwrite: true
-          body: "This is first release"
+    ############################################################
+    # 4 ▸ PACKAGE the .app into an unsigned IPA
+    ############################################################
+    - name: Create unsigned IPA
+      shell: bash
+      working-directory: export/ios
+      run: |
+        mkdir -p Payload
+        cp -R "${{ steps.buildapp.outputs.app }}" Payload/
+        /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
+
+    ############################################################
+    # 5 ▸ UPLOAD the IPA as a downloadable artifact
+    ############################################################
+    - name: Upload IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: MonsterMind-unsigned
+        path: export/ios/MonsterMind-unsigned.ipa
+        retention-days: 7
