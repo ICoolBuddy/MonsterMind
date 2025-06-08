@@ -5,63 +5,77 @@ on:
 
 jobs:
   symbolicate:
-    runs-on: macos-13     # free macOS runner
+    runs-on: macos-13          # GitHub-hosted macOS runner
 
     steps:
-    # 1 ▸ pull the repo (so we get crashlogs/ + dsym/)
+    # ──────────────────────────────────────────────────────────────
+    # 1 ▸ checkout repo so we can read crashlogs/ and dsym/
+    # ──────────────────────────────────────────────────────────────
     - uses: actions/checkout@v4
 
-    # 2 ▸ sanity-check that both files exist
+    # ──────────────────────────────────────────────────────────────
+    # 2 ▸ verify inputs & export paths into env vars
+    # ──────────────────────────────────────────────────────────────
     - name: Verify inputs
       id: verify
+      shell: bash
       run: |
+        set -e
         LOG=$(ls crashlogs/*.{ips,crash} 2>/dev/null | head -n1 || true)
-        if [ -z "$LOG" ]; then
-          echo "::error ::No .ips or .crash file found in crashlogs/"; exit 1
-        fi
         DSYM=$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1 || true)
-        if [ -z "$DSYM" ]; then
-          echo "::error ::No .dSYM bundle found in dsym/"; exit 1
-        fi
+
+        [ -z "$LOG" ]  && { echo "::error ::No .ips or .crash file in crashlogs/"; exit 1; }
+        [ -z "$DSYM" ] && { echo "::error ::No .dSYM bundle in dsym/";           exit 1; }
+
         echo "LOG=$LOG"   >> $GITHUB_ENV
         echo "DSYM=$DSYM" >> $GITHUB_ENV
-        echo "Found log:  $LOG"
+        echo "Found log : $LOG"
         echo "Found dSYM: $DSYM"
 
-    # 3 ▸ locate symbolicatecrash inside the installed Xcode (Xcode 15+ no longer
-    #     exposes it via xcrun, so we search once)
-    - name: Locate symbolicatecrash
-      id: tool
+    # ──────────────────────────────────────────────────────────────
+    # 3 ▸ locate BOTH hidden tools once per run
+    # ──────────────────────────────────────────────────────────────
+    - name: Locate Xcode tools
+      id: tools
+      shell: bash
       run: |
-        # Go up two levels: …/Contents/Developer → …/Contents
-        XCODE_BUNDLE=$(dirname "$(dirname "$(xcode-select -p)")")
-        TOOL=$(find "$XCODE_BUNDLE" -name symbolicatecrash -type f | head -n1)
-        if [ -z "$TOOL" ]; then
-          echo "::error ::symbolicatecrash not found inside $XCODE_BUNDLE"; exit 1
-        fi
-        echo "TOOL=$TOOL" >> $GITHUB_ENV
-        echo "Using $TOOL"
+        set -e
+        XCODE_CONTENTS=$(dirname "$(dirname "$(xcode-select -p)")")
+        CRASHUTIL=$(find "$XCODE_CONTENTS" -name crashutil -type f | head -n1)
+        SYMBOLICATE=$(find "$XCODE_CONTENTS" -name symbolicatecrash -type f | head -n1)
 
-    # 4 ▸ run the symbolication
-    - name: Symbolicate
+        [ -z "$CRASHUTIL" ]   && { echo "::error ::crashutil not found";   exit 1; }
+        [ -z "$SYMBOLICATE" ] && { echo "::error ::symbolicatecrash not found"; exit 1; }
+
+        echo "CRASHUTIL=$CRASHUTIL"       >> $GITHUB_ENV
+        echo "SYMBOLICATE=$SYMBOLICATE"   >> $GITHUB_ENV
+        echo "Using crashutil     : $CRASHUTIL"
+        echo "Using symbolicatecrash: $SYMBOLICATE"
+
+    # ──────────────────────────────────────────────────────────────
+    # 4 ▸ convert if needed, then symbolicate
+    # ──────────────────────────────────────────────────────────────
+    - name: Convert (if .ips) & symbolicate
+      shell: bash
       run: |
-        LOG=$(ls crashlogs/*.{ips,crash} 2>/dev/null | head -n1)
-    
-        # 1 ▸ If it’s a binary .ips, convert it to .crash (text) first
+        set -e
+        LOG="$LOG"           # comes from GITHUB_ENV
+        DSYM="$DSYM"
+
+        # convert .ips → .crash (plain text) if required
         if [[ "$LOG" == *.ips ]]; then
-          echo "Converting $LOG to .crash text format…"
-          xcrun crashutil convert --input "$LOG" --output converted.crash
+          echo "Converting $LOG → converted.crash"
+          "$CRASHUTIL" convert --input "$LOG" --output converted.crash
           LOG=converted.crash
         fi
-    
-        DSYM=$(find dsym -name '*.dSYM' | head -n1)
-        XCODE_BUNDLE=$(dirname "$(dirname "$(xcode-select -p)")")
-        TOOL=$(find "$XCODE_BUNDLE" -name symbolicatecrash -type f | head -n1)
-    
-        export DEVELOPER_DIR="$(xcode-select -p)"
-        "$TOOL" "$LOG" "$DSYM" > crash.symbolicated
 
-    # 5 ▸ hand the readable stack trace back to you
+        export DEVELOPER_DIR="$(xcode-select -p)"   # required by script
+        "$SYMBOLICATE" "$LOG" "$DSYM" > crash.symbolicated
+        echo "✅  Wrote crash.symbolicated"
+
+    # ──────────────────────────────────────────────────────────────
+    # 5 ▸ upload the human-readable stack trace
+    # ──────────────────────────────────────────────────────────────
     - uses: actions/upload-artifact@v4
       with:
         name: symbolicated-crash
