@@ -1,0 +1,44 @@
+name: Symbolicate iOS crash log
+
+on:                        # you’ll launch it manually
+  workflow_dispatch:
+
+jobs:
+  symbolicate:
+    runs-on: macos-13      # free macOS runner
+
+    steps:
+    # 1 ▸ check out the repo (so we can read crashlogs/)
+    - uses: actions/checkout@v4
+
+    # 2 ▸ pull the dSYM artifact produced by your last iOS build
+    - uses: actions/download-artifact@v4
+      with:
+        name: ios-dsym            # must match the name you used in the build workflow
+        path: dsym
+
+    # 3 ▸ pick the first crash file in crashlogs/
+    - name: Locate crash log
+      id: findlog
+      run: |
+        CRASH=$(ls crashlogs/*.{ips,crash} 2>/dev/null | head -n1)
+        if [ -z "$CRASH" ]; then
+          echo "No crash file found in crashlogs/"; exit 1
+        fi
+        echo "crash=$CRASH" >> "$GITHUB_OUTPUT"
+
+    # 4 ▸ run Apple’s symbolicatecrash (ships with Xcode)
+    - name: Symbolicate
+      run: |
+        LOG="${{ steps.findlog.outputs.crash }}"
+        DSYM=$(find dsym -name '*.dSYM' -maxdepth 2 | head -n1)
+        if [ -z "$DSYM" ]; then
+          echo "No dSYM downloaded — did your build workflow upload ios-dsym?"; exit 1
+        fi
+        symbolicatecrash "$LOG" "$DSYM" > crash.symbolicated
+
+    # 5 ▸ hand you the human-readable file
+    - uses: actions/upload-artifact@v4
+      with:
+        name: symbolicated-crash
+        path: crash.symbolicated
