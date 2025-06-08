@@ -1,23 +1,26 @@
 name: Build-iOS-Unsigned-IPA
 
 on:
-  workflow_dispatch
+  workflow_dispatch          # add "push:" if you want auto-builds
 
 jobs:
   build:
-    runs-on: macos-13          # Xcode 15.x image
+    runs-on: macos-13        # Xcode 15.4 image
     steps:
     - uses: actions/checkout@v4
 
-    - name: Add make symlink for every Xcode 15/16 bundle
+    # 1️⃣  Rewrite the absolute make-path inside the .pbxproj
+    - name: Point “Build Haxe” build tool to /usr/bin/make
+      shell: bash
       run: |
-        SYS_MAKE=$(command -v make)
-        for XCODE in /Applications/Xcode_*.app; do
-          TARGET_BIN="$XCODE/Contents/Developer/usr/bin"
-          sudo mkdir -p "$TARGET_BIN"
-          sudo ln -sf "$SYS_MAKE" "$TARGET_BIN/make"
-        done
+        cd export/ios
+        # Replace any “…Developer/usr/bin/make” with /usr/bin/make
+        sed -Ei.bak 's|/Applications/Xcode[^"]*/usr/bin/make|/usr/bin/make|g' \
+          MonsterMind.xcodeproj/project.pbxproj
+        # show what we changed (one line) for the log
+        grep -n '"Build Haxe"' -A4 -B2 MonsterMind.xcodeproj/project.pbxproj | head -n 12
 
+    # 2️⃣  Build with signing disabled
     - name: Build .app (codesign disabled)
       id: buildapp
       shell: bash
@@ -33,10 +36,10 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGN_ENTITLEMENTS="" \
           clean build
-
         APP_PATH=$(find build -name '*.app' -type d | head -n 1)
         echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
 
+    # 3️⃣  Package the unsigned .ipa
     - name: Package unsigned .ipa
       shell: bash
       working-directory: export/ios
@@ -45,6 +48,7 @@ jobs:
         cp -R "${{ steps.buildapp.outputs.app }}" Payload/
         /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
 
+    # 4️⃣  Upload the artifact
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
