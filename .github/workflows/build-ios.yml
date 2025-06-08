@@ -1,59 +1,42 @@
-name: Build-iOS-Unsigned-IPA
+name: iOS-ipa-build
 
 on:
-  workflow_dispatch          # you will trigger it manually
+  workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: macos-13        # GitHub image with Xcode 15.4
+  build-ios:
+    name: 🎉 iOS Build
+    runs-on: macos-latest
     steps:
+      - uses: actions/checkout@v3
 
-    # 1 ▸ check out your source
-    - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
+      - run: flutter pub get
+      
 
-    # 2 ▸ FIX the hard-coded make path inside the Xcode project
-    - name: Point “Build Haxe” to the real make
-      shell: bash
-      run: |
-        # go to the folder that holds MonsterMind.xcodeproj
-        cd export/ios
-        # replace ANY “…Developer/usr/bin/make” with /usr/bin/make
-        sed -Ei.bak 's|/Applications/Xcode[^"]*/usr/bin/make|/usr/bin/make|g' \
-          MonsterMind.xcodeproj/project.pbxproj
+      - run: pod repo update
+        working-directory: ios
 
-    # 3 ▸ build the app with code-signing disabled
-    - name: Build .app (unsigned)
-      id: buildapp
-      shell: bash
-      run: |
-        cd export/ios
-        xcodebuild \
-          -project   MonsterMind.xcodeproj \
-          -scheme    MonsterMind \
-          -configuration Release \
-          -destination 'generic/platform=iOS' \
-          -derivedDataPath build \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGN_ENTITLEMENTS="" \
-          clean build
-        # remember where the .app landed
-        APP_PATH=$(find build -name '*.app' -type d | head -n 1)
-        echo "app=$APP_PATH" >> "$GITHUB_OUTPUT"
+      - run: flutter build ios --release --no-codesign
 
-    # 4 ▸ zip the .app into an unsigned IPA
-    - name: Package unsigned .ipa
-      shell: bash
-      working-directory: export/ios
-      run: |
-        mkdir -p Payload
-        cp -R "${{ steps.buildapp.outputs.app }}" Payload/
-        /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
+      - run: mkdir Payload
+        working-directory: build/ios/iphoneos
 
-    # 5 ▸ upload the IPA as a workflow artifact
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: MonsterMind-unsigned
-        path: export/ios/MonsterMind-unsigned.ipa
-        retention-days: 7
+      - run: mv Runner.app/ Payload
+        working-directory: build/ios/iphoneos
+
+      - name: Zip output
+        run: zip -qq -r -9 FlutterIpaExport.ipa Payload
+        working-directory: build/ios/iphoneos
+
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: build/ios/iphoneos/FlutterIpaExport.ipa
+          tag: v1.0
+          overwrite: true
+          body: "This is first release"
