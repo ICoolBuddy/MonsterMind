@@ -171,17 +171,40 @@ class Critter implements IFlxDestroyable
 		setColor(CRITTER_COLORS[FlxG.random.int(0, CRITTER_COLORS.length - 1)]);
 	}
 
-	public static function loadPaletteShiftedGraphic(sprite:FlxSprite, critterColor:CritterColor, graphicAsset:FlxGraphicAsset, animated:Bool = false, width:Int = 0, height:Int = 0)
+	public static function loadPaletteShiftedGraphic(
+        sprite:FlxSprite,
+        critterColor:CritterColor,
+        graphicAsset:FlxGraphicAsset,
+        animated:Bool = false,
+        width:Int = 0,
+        height:Int = 0):Void
 	{
-		var graphicKey:String = graphicAsset + "-" + critterColor.englishBackup;
+		/* ── runtime guards (kill the crash) ─────────────────────── */
+		if (sprite == null) return;
+		if (critterColor == null || critterColor.tint == null)
+			critterColor = CRITTER_COLORS[0];
+
+		/* ── cache key per-colour ────────────────────────────────── */
+		var graphicKey = Std.string(graphicAsset) + "-" + critterColor.englishBackup;
+
 		if (FlxG.bitmap.get(graphicKey) == null)
 		{
 			var graphic:FlxGraphic = FlxG.bitmap.add(graphicAsset, true, graphicKey);
+			var bmp   = graphic.bitmap;
+			var rect  = new Rectangle(0, 0, bmp.width, bmp.height);
+			var point = new Point();
+
+			/* original loop pattern — now safe */
 			for (key in critterColor.tint.keys())
 			{
-				graphic.bitmap.threshold(graphic.bitmap, new Rectangle(0, 0, graphic.bitmap.width, graphic.bitmap.height), new Point(0, 0), '==', key, critterColor.tint[key]);
+				var src = key;                      // colour to search
+				var dst = critterColor.tint[key];   // replacement
+				if (dst != src)
+					bmp.threshold(bmp, rect, point,
+								"==", src, dst, 0xFFFFFFFF, true);
 			}
 		}
+
 		sprite.loadGraphic(graphicKey, animated, width, height);
 	}
 
