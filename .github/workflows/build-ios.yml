@@ -1,82 +1,69 @@
-# File: .github/workflows/haxe-ipa.yml
-name: Build-iOS-Unsigned-IPA
+name: Build unsigned iOS IPA
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]           # run on every push to main
+  workflow_dispatch:           # plus the manual button
 
 jobs:
-  build:
-    runs-on: macos-13          # Xcode 15.4 image
-    steps:
+  ios:
+    runs-on: macos-13          # Intel runner – setup-haxe works here
 
-    ############################################################
-    # 1 ▸ Check out your repo
-    ############################################################
+    steps:
+    # 1 ▸ check out your repo
     - uses: actions/checkout@v4
 
-    ############################################################
-    # 2 ▸ PATCH bad make path (unchanged)
-    ############################################################
-    - name: Fix “Build Haxe” make-path
-      shell: bash
-      run: |
-        PBX="export/ios/MonsterMind.xcodeproj/project.pbxproj"
-        sed -Ei.bak \
-          -e 's|/Applications/Xcode[^"]*/usr/bin/make|/usr/bin/make|g' \
-          -e 's|\$\([Dd][Ee][Vv][Ee][Ll][Oo][Pp][Ee][Rr]_[Dd][Ii][Rr]\)/usr/bin/make|/usr/bin/make|g' \
-          "$PBX"
-
-    ############################################################
-    # 3 ▸ BUILD the .app  ➜  also echo the dSYM path
-    ############################################################
-    - name: Compile (unsigned)
-      id: buildapp
-      shell: bash
-      run: |
-        cd export/ios
-        xcodebuild \
-          -project   MonsterMind.xcodeproj \
-          -scheme    MonsterMind \
-          -configuration Release \
-          -destination 'generic/platform=iOS' \
-          -derivedDataPath build \
-          CODE_SIGNING_ALLOWED=NO \
-          CODE_SIGNING_REQUIRED=NO \
-          clean build
-
-        APP_PATH=$(find build -name '*.app'  -type d | head -n 1)
-        DSYM_PATH=$(find build -name '*.dSYM' -type d | head -n 1)
-
-        echo "app=$APP_PATH"  >> "$GITHUB_OUTPUT"
-        echo "dsym=$DSYM_PATH" >> "$GITHUB_OUTPUT"
-
-    ############################################################
-    # 4 ▸ PACKAGE the .app into an unsigned IPA  (unchanged)
-    ############################################################
-    - name: Create unsigned IPA
-      shell: bash
-      working-directory: export/ios
-      run: |
-        mkdir -p Payload
-        cp -R "${{ steps.buildapp.outputs.app }}" Payload/
-        /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
-
-    ############################################################
-    # 5 ▸ ZIP the matching dSYM  (NEW)
-    ############################################################
-    - name: Zip dSYM
-      shell: bash
-      run: |
-        zip -qry MonsterMind.dSYM.zip "${{ steps.buildapp.outputs.dsym }}"
-
-    ############################################################
-    # 6 ▸ UPLOAD both IPA and dSYM  (updated)
-    ############################################################
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
+    # 2 ▸ install Haxe + Neko
+    - uses: krdlab/setup-haxe@v1
       with:
-        name: MonsterMind-build
+        haxe-version: 4.3.4
+
+    # 3 ▸ cache haxelib folder
+    - uses: actions/cache@v4
+      with:
+        path: ~/haxelib
+        key: ${{ runner.os }}-haxelib-${{ hashFiles('haxelib.json') }}
+        restore-keys: ${{ runner.os }}-haxelib-
+
+    # 4 ▸ install libraries
+    - name: Install OpenFL + Flixel stack
+      run: |
+        haxelib setup ~/haxelib
+        haxelib install lime --quiet
+        haxelib install openfl --quiet
+        haxelib install flixel --quiet
+        haxelib install flixel-addons --quiet   # comment out if unused
+        haxelib install flixel-ui --quiet       # comment out if unused
+        haxelib run lime setup -y
+        haxelib run lime setup flixel -y
+
+    # 5 ▸ build Release, unsigned
+    - name: Build unsigned .app
+      run: |
+        haxelib run lime build ios -release -nosign
+
+    # 6 ▸ package Payload → unsigned.ipa
+    - name: Package unsigned IPA
+      run: |
+        APP=$(find Export/ios/build/Release-iphoneos -name '*.app' -maxdepth 1 | head -n1)
+        mkdir Payload
+        cp -R "$APP" Payload/
+        zip -r -y unsigned.ipa Payload
+
+    # 7 ▸ **zip the matching dSYM** (NEW)
+    - name: Collect & zip dSYM
+      run: |
+        DSYM=$(find Export/ios/build/Release-iphoneos -name '*.dSYM' -maxdepth 1 | head -n1)
+        if [ -z "$DSYM" ]; then
+          echo "❌  No dSYM found – build must have failed"; exit 1
+        fi
+        zip -r -y MonsterMind.dSYM.zip "$DSYM"
+
+    # 8 ▸ upload both IPA and dSYM
+    - uses: actions/upload-artifact@v4
+      with:
+        name: unsigned-ios-build
         path: |
-          export/ios/MonsterMind-unsigned.ipa
+          unsigned.ipa
           MonsterMind.dSYM.zip
         retention-days: 7
