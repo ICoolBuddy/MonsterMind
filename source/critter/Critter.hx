@@ -179,12 +179,12 @@ class Critter implements IFlxDestroyable
         width:Int = 0,
         height:Int = 0):Void
 	{
-		/* 1 ▸ guards – stop every null / O-B access right here */
+		/* 1 ▸ guards – stop null / SIGSEGV */
 		if (sprite == null) return;
 		if (critterColor == null || critterColor.tint == null)
-			critterColor = CRITTER_COLORS[0];        // safe default
+			critterColor = CRITTER_COLORS[0];
 
-		/* 2 ▸ cache key per colour – so we recolour each PNG only once */
+		/* 2 ▸ cache key per colour */
 		var gKey = Std.string(graphicAsset) + "-" + critterColor.englishBackup;
 
 		if (FlxG.bitmap.get(gKey) == null)
@@ -194,18 +194,17 @@ class Critter implements IFlxDestroyable
 			var rect  = new Rectangle(0, 0, bmp.width, bmp.height);
 			var point = new Point();
 
-			// tint is Array<Int> (verified non-null by the guard above)
-			for (idx in 0...critterColor.tint.length)
+			/* Map iterator – no .length needed, compiles everywhere */
+			for (src in critterColor.tint.keys())
 			{
-				var src = idx;
-				var dst = critterColor.tint[idx];
+				var dst = critterColor.tint[src];
 				if (dst != src)
 					bmp.threshold(bmp, rect, point,
-								"==", src, dst, 0xFFFFFFFF, /*copyAlpha*/ true);
+								"==", src, dst, 0xFFFFFFFF, true);
 			}
 		}
 
-		/* 3 ▸ finally hand the recoloured frames to the sprite            */
+		/* 3 ▸ load frames */
 		sprite.loadGraphic(gKey, animated, width, height);
 	}
 
