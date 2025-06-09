@@ -171,41 +171,45 @@ class Critter implements IFlxDestroyable
 		setColor(CRITTER_COLORS[FlxG.random.int(0, CRITTER_COLORS.length - 1)]);
 	}
 
-	public static function loadPaletteShiftedGraphic(
-        sprite:FlxSprite,
-        critterColor:CritterColor,
-        graphicAsset:FlxGraphicAsset,
-        animated:Bool = false,
-        width:Int = 0,
-        height:Int = 0):Void
+	public static function loadPaletteShiftedGraphic(sprite:FlxSprite, critterColor:CritterColor, graphicAsset:FlxGraphicAsset, animated:Bool = false, width:Int = 0, height:Int = 0):Void
 	{
-		/* 1 ▸ guards – stop null / SIGSEGV */
-		if (sprite == null) return;
-		if (critterColor == null || critterColor.tint == null)
-			critterColor = CRITTER_COLORS[0];
-
-		/* 2 ▸ cache key per colour */
-		var gKey = Std.string(graphicAsset) + "-" + critterColor.englishBackup;
-
-		if (FlxG.bitmap.get(gKey) == null)
-		{
-			var g:FlxGraphic = FlxG.bitmap.add(graphicAsset, true, gKey);
-			var bmp   = g.bitmap;
-			var rect  = new Rectangle(0, 0, bmp.width, bmp.height);
-			var point = new Point();
-
-			/* Map iterator – no .length needed, compiles everywhere */
-			for (src in critterColor.tint.keys())
-			{
-				var dst = critterColor.tint[src];
-				if (dst != src)
-					bmp.threshold(bmp, rect, point,
-								"==", src, dst, 0xFFFFFFFF, true);
-			}
-		}
-
-		/* 3 ▸ load frames */
-		sprite.loadGraphic(gKey, animated, width, height);
+	    /* 1 ▸ guards – stop null / SIGSEGV right away */
+	    if (sprite == null) return;
+	    if (critterColor == null || critterColor.tint == null)
+	        critterColor = CRITTER_COLORS[0];
+	
+	    /* 2 ▸ cache-key per colour so we recolour each PNG once */
+	    var gKey = Std.string(graphicAsset) + "-" + critterColor.englishBackup;
+	
+	    if (FlxG.bitmap.get(gKey) == null)
+	    {
+	        var g:FlxGraphic = FlxG.bitmap.add(graphicAsset, true, gKey);
+	
+	        /* ─── NEW SAFETY NET ───────────────────────────────────── */
+	        if (g == null || g.bitmap == null)
+	        {
+	            // PNG missing or decoder failed – fall back to the original art
+	            sprite.loadGraphic(graphicAsset, animated, width, height);
+	            return;           // prevent EXC_BAD_ACCESS at 0x18
+	        }
+	        /* ──────────────────────────────────────────────────────── */
+	
+	        var bmp   = g.bitmap;
+	        var rect  = new Rectangle(0, 0, bmp.width, bmp.height);
+	        var point = new Point();
+	
+	        /* Map iterator – works for Map<FlxColor,FlxColor> */
+	        for (src in critterColor.tint.keys())
+	        {
+	            var dst = critterColor.tint[src];
+	            if (dst != src)
+	                bmp.threshold(bmp, rect, point,
+	                              "==", src, dst, 0xFFFFFFFF, true);
+	        }
+	    }
+	
+	    /* 3 ▸ load (possibly recoloured) frames into the sprite */
+	    sprite.loadGraphic(gKey, animated, width, height);
 	}
 
 	public function setColor(critterColor:CritterColor)
