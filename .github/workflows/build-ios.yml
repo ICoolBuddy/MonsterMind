@@ -1,20 +1,37 @@
 # File: .github/workflows/haxe-ipa.yml
 name: Build-iOS-Unsigned-IPA
-on: workflow_dispatch
+
+on:
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-13
-
+    runs-on: macos-13          # Xcode 15.4 image
     steps:
-    # 1 ▸ check out
+
+    ############################################################
+    # 1 ▸ Check out your repo
+    ############################################################
     - uses: actions/checkout@v4
 
-    # 2 ▸ (your patch step)
+    ############################################################
+    # 2 ▸ PATCH bad make path (unchanged)
+    ############################################################
+    - name: Fix “Build Haxe” make-path
+      shell: bash
+      run: |
+        PBX="export/ios/MonsterMind.xcodeproj/project.pbxproj"
+        sed -Ei.bak \
+          -e 's|/Applications/Xcode[^"]*/usr/bin/make|/usr/bin/make|g' \
+          -e 's|\$\([Dd][Ee][Vv][Ee][Ll][Oo][Pp][Ee][Rr]_[Dd][Ii][Rr]\)/usr/bin/make|/usr/bin/make|g' \
+          "$PBX"
 
-    # 3 ▸ build the .app (UNCHANGED)
+    ############################################################
+    # 3 ▸ BUILD the .app  ➜  also echo the dSYM path
+    ############################################################
     - name: Compile (unsigned)
       id: buildapp
+      shell: bash
       run: |
         cd export/ios
         xcodebuild \
@@ -27,39 +44,39 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           clean build
 
-        # paths for later steps
         APP_PATH=$(find build -name '*.app'  -type d | head -n 1)
         DSYM_PATH=$(find build -name '*.dSYM' -type d | head -n 1)
+
         echo "app=$APP_PATH"  >> "$GITHUB_OUTPUT"
         echo "dsym=$DSYM_PATH" >> "$GITHUB_OUTPUT"
 
-    # 4 ▸ package unsigned IPA (UNCHANGED)
+    ############################################################
+    # 4 ▸ PACKAGE the .app into an unsigned IPA  (unchanged)
+    ############################################################
     - name: Create unsigned IPA
+      shell: bash
+      working-directory: export/ios
       run: |
         mkdir -p Payload
         cp -R "${{ steps.buildapp.outputs.app }}" Payload/
         /usr/bin/zip -qry MonsterMind-unsigned.ipa Payload
-      working-directory: export/ios
 
-    # 5 ▸ **ZIP the dSYM that matches this IPA**
+    ############################################################
+    # 5 ▸ ZIP the matching dSYM  (NEW)
+    ############################################################
     - name: Zip dSYM
+      shell: bash
       run: |
-        cd "$(dirname "${{ steps.buildapp.outputs.dsym }}")"
-        zip -qry MonsterMind.dSYM.zip "$(basename "${{ steps.buildapp.outputs.dsym }}")"
+        zip -qry MonsterMind.dSYM.zip "${{ steps.buildapp.outputs.dsym }}"
 
-    # 6 ▸ upload both artifacts
-    - name: Upload IPA & dSYM
+    ############################################################
+    # 6 ▸ UPLOAD both IPA and dSYM  (updated)
+    ############################################################
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: MonsterMind-build
         path: |
           export/ios/MonsterMind-unsigned.ipa
-          $(dirname "${{ steps.buildapp.outputs.dsym }}")/MonsterMind.dSYM.zip
-        retention-days: 30
-
-    # ───────── OPTIONAL: push dSYM straight to Sentry / Crashlytics ─────────
-    # - name: Upload dSYM to Sentry
-    #   run: |
-    #     sentry-cli login --auth-token ${{ secrets.SENTRY_AUTH_TOKEN }}
-    #     sentry-cli debug-files upload MonsterMind.dSYM.zip \
-    #       --org argonvile --project monstermind-ios
+          MonsterMind.dSYM.zip
+        retention-days: 7
