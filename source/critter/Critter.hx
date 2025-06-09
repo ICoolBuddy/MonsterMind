@@ -179,33 +179,34 @@ class Critter implements IFlxDestroyable
         width:Int = 0,
         height:Int = 0):Void
 	{
-		/* ── runtime guards (kill the crash) ─────────────────────── */
+		/* 1 ▸ guards – stop every null / O-B access right here */
 		if (sprite == null) return;
 		if (critterColor == null || critterColor.tint == null)
-			critterColor = CRITTER_COLORS[0];
+			critterColor = CRITTER_COLORS[0];        // safe default
 
-		/* ── cache key per-colour ────────────────────────────────── */
-		var graphicKey = Std.string(graphicAsset) + "-" + critterColor.englishBackup;
+		/* 2 ▸ cache key per colour – so we recolour each PNG only once */
+		var gKey = Std.string(graphicAsset) + "-" + critterColor.englishBackup;
 
-		if (FlxG.bitmap.get(graphicKey) == null)
+		if (FlxG.bitmap.get(gKey) == null)
 		{
-			var graphic:FlxGraphic = FlxG.bitmap.add(graphicAsset, true, graphicKey);
-			var bmp   = graphic.bitmap;
+			var g:FlxGraphic = FlxG.bitmap.add(graphicAsset, true, gKey);
+			var bmp   = g.bitmap;
 			var rect  = new Rectangle(0, 0, bmp.width, bmp.height);
 			var point = new Point();
 
-			/* original loop pattern — now safe */
-			for (key in critterColor.tint.keys())
+			// tint is Array<Int> (verified non-null by the guard above)
+			for (idx in 0...critterColor.tint.length)
 			{
-				var src = key;                      // colour to search
-				var dst = critterColor.tint[key];   // replacement
+				var src = idx;
+				var dst = critterColor.tint[idx];
 				if (dst != src)
 					bmp.threshold(bmp, rect, point,
-								"==", src, dst, 0xFFFFFFFF, true);
+								"==", src, dst, 0xFFFFFFFF, /*copyAlpha*/ true);
 			}
 		}
 
-		sprite.loadGraphic(graphicKey, animated, width, height);
+		/* 3 ▸ finally hand the recoloured frames to the sprite            */
+		sprite.loadGraphic(gKey, animated, width, height);
 	}
 
 	public function setColor(critterColor:CritterColor)
